@@ -1,0 +1,6 @@
+Установка операторов envoy-gateway
+helm repo add envoy-gateway https://envoyproxy.github.io/gateway && helm repo update
+
+Генерация сертификата
+openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout tls.key -out tls.crt -subj "/CN=localhost"
+kubectl create secret tls tls-secret --cert=tls.crt --key=tls.key -n envoy-gateway

@@ -1,0 +1,50 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: citus-cluster
+  namespace: postgres
+spec:
+  instances: 3 
+  imageName: ghcr.io/cloudnative-pg/postgresql:16.4
+  extensions:
+    - name: citus
+      pgVersion: "16"
+  storage:
+    size: 2Gi
+    storageClass: "standard" 
+  bootstrap:
+    initdb:
+      database: usersdb
+      owner: user
+      secret:
+        name: userdb-owner-secret
+  superuserSecret:
+    name: superuser-secret
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "768Mi"
+    limits:
+      cpu: "1"
+      memory: "1.5Gi"
+  affinity:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchExpressions:
+            - key: postgresql
+              operator: In
+              values:
+              - citus-cluster
+          topologyKey: topology.kubernetes.io/zone
+  monitoring:
+    enablePodMonitor: true
+  backup:
+    barmanObjectStore: null  # Добавить S3 для бэкапов
+  postgresql:
+    parameters:
+      shared_preload_libraries: "citus"
+      max_connections: 500
+      wal_buffers: 64MB

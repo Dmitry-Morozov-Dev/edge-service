@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kafka-metrics
+  namespace: kafka
+data:
+  kafka-metrics.yaml: |
+    lowercaseOutputName: true
+    rules:
+    - pattern: "kafka.server<type=(.+), name=(.+), clientId=(.+), topic=(.+), partition=(.*)><>Value"
+      name: "kafka_server_$1_$2"
+      labels:
+        clientId: "$3"
+        topic: "$4"
+        partition: "$5"
+    - pattern: "kafka.server<type=(.+), name=(.+)><>Count"
+      name: "kafka_server_$1_$2_count"

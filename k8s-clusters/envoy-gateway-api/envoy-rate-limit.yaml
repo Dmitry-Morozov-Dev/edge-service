@@ -1,0 +1,17 @@
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: RateLimitPolicy
+metadata:
+  name: rate-policy
+spec:
+  targetRef:
+    group: gateway.networking.k8s.io
+    kind: HTTPRoute
+    name: api-route
+  global:
+    rules:
+    - clientSelectors:
+      - headers:
+        - name: x-user-id
+      limit:
+        requests: 50
+        unit: minute

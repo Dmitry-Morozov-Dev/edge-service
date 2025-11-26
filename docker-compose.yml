@@ -1,0 +1,168 @@
+version: '3.9'
+
+services:
+  kafka:
+    image: confluentinc/cp-kafka:8.1.0
+    container_name: kafka
+    hostname: kafka
+    ports:
+      - "9092:29092"
+    environment:
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://kafka:29092,CONTROLLER://kafka:29093,PLAINTEXT_HOST://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:29093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    healthcheck:
+      test: ["CMD", "kafka-topics", "--bootstrap-server", "localhost:29092", "--list"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis-pubsub:
+    image: redis:7-alpine
+    container_name: redis-pubsub
+    ports:
+      - "6379:6379"
+    command: redis-server --save '' --appendonly no
+
+  redis-cache:
+    image: redis:7-alpine
+    container_name: redis-cache
+    ports:
+      - "6380:6379"
+    command: redis-server --save '' --appendonly no
+
+  cassandra:
+    image: cassandra:5.0
+    ports:
+      - "9042:9042"
+    environment:
+      - CASSANDRA_CLUSTER_NAME=messenger-local
+    volumes:
+      - cassandra-data:/var/lib/cassandra
+    healthcheck:
+      test: ["CMD-SHELL", "cqlsh -e 'describe keyspaces' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:9.2.1
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms1g -Xmx1g"
+    ports:
+      - "9200:9200"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9200/_cluster/health?wait_for_status=green&timeout=60s"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  elasticsearch-setup:
+    image: curlimages/curl:8.10.1
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    volumes:
+      - ./elasticsearch/mappings:/mappings:ro
+    command: >
+      sh -c "
+        echo 'Applying message search index mapping...';
+        curl -s -X PUT http://elasticsearch:9200/messages \
+          -H 'Content-Type: application/json' \
+          -d @/mappings/messages.json || echo 'Index already exists or failed (OK)';
+        echo 'Message search index ready';
+      "
+
+  edge-service:
+    image: dmitrymorozovdev/edge-service:latest
+    container_name: edge-service
+    ports:
+      - "8080:8080"
+      - "5005:5005"
+    environment:
+      - REDIS_PUBSUB_NODES=redis-pubsub:6379
+      - REDIS_CACHE_NODES=redis-cache:6379
+      - KAFKA_BOOTSTRAP=kafka:29092
+      - GRPC_USER_CHATS_ADDR=chat-service:9090
+      - JAVA_TOOL_OPTIONS=-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005
+    volumes:
+      - ../edge-service/target/classes:/app/target/classes
+    depends_on:
+      redis-pubsub:
+        condition: service_started
+      redis-cache:
+        condition: service_started
+      cassandra:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+      elasticsearch:
+        condition: service_healthy
+
+  delivery-worker:
+    image: dmitrymorozovdev/delivery-worker-service:latest
+    container_name: delivery-worker
+    ports:
+      - "8081:8081"
+      - "5006:5006"
+    environment:
+      - REDIS_PUBSUB_NODES=redis-pubsub:6379
+      - REDIS_CACHE_NODES=redis-cache:6379
+      - KAFKA_BOOTSTRAP=kafka:29092
+      - JAVA_TOOL_OPTIONS=-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5006
+    volumes:
+      - ../delivery-worker-service/target/classes:/app/target/classes
+    depends_on:
+      redis-pubsub:
+        condition: service_started
+      redis-cache:
+        condition: service_started
+      kafka:
+        condition: service_started
+
+  chat-service:
+    image: dmitrymorozovdev/chat-service:latest
+    container_name: chat-service
+    ports:
+      - "8082:8082"
+      - "5007:5007"
+      - "9090:9090"
+    environment:
+      - REDIS_CACHE_NODES=redis-cache:6379
+      - KAFKA_BOOTSTRAP=kafka:29092
+      - CASSANDRA_CONTACT_POINTS=cassandra:9042
+      - GRPC_SERVER_PORT=9090
+      - ELASTICSEARCH_URIS=http://elasticsearch:9200
+      - JAVA_TOOL_OPTIONS=-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5007
+    volumes:
+      - ../chat-service/target/classes:/app/target/classes
+    depends_on:
+      redis-cache:
+        condition: service_started
+      cassandra:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+      elasticsearch:
+        condition: service_healthy
+
+volumes:
+  cassandra-data:
+    name: messenger-cassandra-data
+
+networks:
+  default:
+    name: messenger-local

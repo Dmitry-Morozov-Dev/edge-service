@@ -1,0 +1,79 @@
+apiVersion: k8ssandra.io/v1alpha1
+kind: K8ssandraCluster
+metadata:
+  name: my-cassandra-cluster
+  namespace: k8ssandra
+spec:
+  cassandra:
+    serverVersion: "4.1.5"
+    superuserSecretRef:
+      name: cassandra-superuser
+    telemetry:
+      prometheus:
+        enabled: true
+    datacenters:
+      - metadata:
+          name: dc1
+        size: 3
+        racks:
+          - name: rack1
+            nodeAffinityLabels:
+              topology.kubernetes.io/zone: zone-a
+          # Для продакшена с несколькими "стойками"
+          # - name: rack2
+          #   nodeAffinityLabels:
+          #     topology.kubernetes.io/zone: zone-b
+          # - name: rack3
+          #   nodeAffinityLabels:
+          #     topology.kubernetes.io/zone: zone-c
+        storageConfig:
+          cassandraDataVolumeClaimSpec:
+            storageClassName: cassandra-storage
+            accessModes:
+              - ReadWriteOnce
+            resources:
+              requests:
+                storage: 5Gi
+        config:
+          jvmOptions:
+            heapSize: 1024M
+          cassandraYaml:
+            num_tokens: 16
+            allocate_tokens_for_local_replication_factor: 3
+            authenticator: PasswordAuthenticator
+        resources:
+          requests:
+            cpu: "500m"
+            memory: "768Mi"
+          limits:
+            cpu: "1"
+            memory: "1.5Gi"
+        stargate:
+          size: 1
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "500m"
+              memory: "1Gi"
+    softPodAntiAffinity: true
+  reaper:
+    containerImage: 
+      name: "thelastpickle/cassandra-reaper:4.0.0-rc1"
+    resources:
+      requests:
+        cpu: "250m"
+        memory: "512Mi"
+      limits:
+        cpu: "500m"
+        memory: "1Gi"
+    cassandraUserSecretRef:
+      name: cassandra-superuser
+  # Подключить S3
+  # medusa:
+  #   enabled: false
+  #   storageProperties:
+  #     storageProvider: s3_compatible
+  #     bucketName: my-cassandra-backups
+  #     keyFile: /etc/medusa/secrets/s3-key

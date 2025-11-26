@@ -1,0 +1,17 @@
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: ProxyFilter
+metadata:
+  name: ws-filter
+spec:
+  type: http
+  http:
+    idleTimeout: 300s
+    requestTimeout: 5s 
+    circuitBreakers:
+      threshold:
+        maxConnections: 1000
+        maxRetries: 3
+    outlierDetection:
+      consecutiveErrors: 5
+      interval: 10s
+      baseEjectionTime: 60s

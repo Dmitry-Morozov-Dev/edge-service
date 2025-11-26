@@ -1,0 +1,51 @@
+cluster:
+  nodes: 4
+  replicas: 1
+  init: true 
+
+persistence:
+  enabled: true
+  storageClass: "redis-storage"
+  size: 2Gi
+  accessModes:
+    - ReadWriteOnce
+
+metrics:
+  enabled: true
+
+auth:
+  enabled: true
+  existingSecret: redis-password
+  existingSecretPasswordKey: password
+
+resources:
+  requests:
+    cpu: "500m"
+    memory: "768Mi"
+  limits:
+    cpu: "1"
+    memory: 1.5Gi
+
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/component
+                operator: In
+                values:
+                  - redis
+          topologyKey: topology.kubernetes.io/zone
+
+service:
+  type: ClusterIP 
+  ports:
+    redis: 6379
+    sentinel: 26379 
+
+image:
+  registry: docker.io
+  repository: bitnami/redis
+  tag: "7.2.5-debian-12-r3"

@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+option java_multiple_files = true;
+option java_package = "com.messenger.chat_service_new.grpc";
+option java_outer_classname = "UserChatsProto";
+
+service UserChatsService {
+  rpc GetUserChats(GetUserChatsRequest) returns (GetUserChatsResponse);
+}
+
+message GetUserChatsRequest {
+  string user_id = 1;
+}
+
+message GetUserChatsResponse {
+  repeated string chat_ids = 1;
+}

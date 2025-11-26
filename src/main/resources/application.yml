@@ -1,0 +1,160 @@
+server:
+  port: 8080
+  compression:
+    enabled: true
+    mime-types:
+      - application/json
+      - text/plain
+
+spring:
+  application:
+    name: edge-service
+  main:
+    allow-bean-definition-overriding: true
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:9092}
+    topic:
+      message.out: ${KAFKA_TOPIC_MESSAGES:messages}
+      events: ${KAFKA_TOPIC_EVENTS:events}
+      dlq: ${KAFKA_TOPIC_DLQ:dlq-messages}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      compression-type: snappy
+      acks: all
+      retries: 3
+      linger-ms: 1
+      batch-size: 16384
+  autoconfigure:
+    exclude:
+    - org.springframework.boot.autoconfigure.cassandra.CassandraAutoConfiguration
+    - org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration
+
+redis:
+  pubsub:
+    cluster:
+      nodes: ${REDIS_PUBSUB_NODES:localhost:6381,localhost:6382,localhost:6383}
+    config:
+      connect-timeout-ms: 15000
+      command-timeout-ms: 10000
+      shutdown-timeout-ms: 100
+      max-redirects: 3
+      topology-refresh-periodic-sec: 10
+      validate-cluster-node-membership: false
+
+  cache:
+    cluster:
+      nodes: ${REDIS_CACHE_NODES:localhost:6391,localhost:6392,localhost:6393}
+    config:
+      connect-timeout-ms: 15000
+      command-timeout-ms: 10000
+      shutdown-timeout-ms: 100
+      max-redirects: 5
+      topology-refresh-periodic-sec: 10
+      validate-cluster-node-membership: false
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,metrics,prometheus,loggers
+  metrics:
+    tags:
+      application: ${spring.application.name}
+  endpoint:
+    health:
+      show-details: always
+
+edge:
+  id: ${EDGE_ID:edge-${random.uuid}}    # change in prod
+  websocket:
+    path: "/ws/connect"
+    compression: true
+    max-frame-size: 65536
+    buffer:
+      size: ${EDGE_WEBSOCKET_BUFFER_SIZE:10}
+    heartbeat:
+      interval-seconds: ${EDGE_HEARTBEAT_INTERVAL_SECONDS:30}
+  receiver:
+    buffer:
+      size: ${EDGE_RECEIVER_BUFFER_SIZE:10000}
+  broadcast:
+    concurrency: ${EDGE_BROADCAST_CONCURRENCY:16}
+  channel:
+    pattern: ${EDGE_CHANNEL_PATTERN:edge:${edge.id}:messages:*}
+  validation:
+    message:
+      content-max-length: 4096
+      temp-id-max-length: 200
+      media-max-count: 10
+      media-url-max-length: 2000
+
+grpc:
+  client:
+    userChatsService:
+      address: 'static://chat-service:9090'
+      negotiationType: plaintext
+      maxInboundMessageSize: 4194304   # 4MB
+      keepAliveTime: 60
+      keepAliveTimeout: 20
+      retry: true
+      enableRetry: true
+
+resilience4j:
+  circuitbreaker:
+    instances:
+      grpcOps:
+        registerHealthIndicator: true
+        slidingWindowSize: 50
+        failureRateThreshold: 50
+        waitDurationInOpenState: 10s
+        permittedNumberOfCallsInHalfOpenState: 10
+        ignoreExceptions:
+          - com.messenger.edge_service.error.ServiceDegradedException
+        recordExceptions:
+          - io.grpc.StatusRuntimeException
+          - io.netty.channel.ConnectTimeoutException
+      redisOps:
+        registerHealthIndicator: true
+        slidingWindowSize: 50
+        failureRateThreshold: 30
+        waitDurationInOpenState: 10s
+        ignoreExceptions:
+          - com.messenger.edge_service.error.ServiceDegradedException
+        recordExceptions:
+          - org.springframework.data.redis.RedisConnectionFailureException
+      kafkaProducer:
+        registerHealthIndicator: true
+        slidingWindowSize: 100
+        failureRateThreshold: 50
+        waitDurationInOpenState: 10s
+
+logging:
+  level:
+    root: INFO
+    org:
+      springframework: INFO
+      springframework.web: INFO
+      reactor.netty: INFO
+    com:
+      messenger:
+        edge_service: DEBUG
+
+network:
+  timeouts:
+    redis:
+      pubsub-command-timeout-ms: 1000
+      cache-command-timeout-ms: 3000
+    kafka:
+      request-timeout-ms: 30000
+
+# change in prod
+security:
+  kafka:
+    ssl:
+      enabled: ${KAFKA_SSL_ENABLED:false}
+      truststore-location: ${KAFKA_SSL_TRUSTSTORE_LOCATION:}
+      truststore-password: ${KAFKA_SSL_TRUSTSTORE_PASSWORD:}
+  grpc:
+    tls-enabled: false

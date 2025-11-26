@@ -1,0 +1,17 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: TCPRoute
+metadata:
+  name: ws-route
+spec:
+  parentRefs:
+  - name: messenger-gateway
+  rules:
+  - backendRefs:
+    - name: chat-service
+      port: 8080
+    filters:
+    - type: ExtensionRef
+      extensionRef:
+        group: gateway.envoyproxy.io
+        kind: ProxyFilter
+        name: ws-filter

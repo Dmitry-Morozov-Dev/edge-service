@@ -1,0 +1,16 @@
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: SecurityPolicy
+metadata:
+  name: jwt-policy
+spec:
+  targetRef:
+    group: gateway.networking.k8s.io
+    kind: HTTPRoute
+    name: api-route
+  jwt:
+    providers:
+    - name: your-issuer
+      remoteJWKS:
+        uri: https://your-jwks-uri 
+        timeout: 5s
+      fromHeaders: [{"name": "Authorization", "prefix": "Bearer "}]

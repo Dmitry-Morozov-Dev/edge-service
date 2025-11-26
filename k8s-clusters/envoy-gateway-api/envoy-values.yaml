@@ -1,0 +1,44 @@
+config:
+  envoyGateway:
+    gateway:
+      controllerName: gateway.envoyproxy.io/gateway-class-controller
+    rateLimit:
+      enabled: true 
+    extensionManager:
+      hooks:
+        xdsTranslator:
+          post:  
+            - name: jwt-wasm
+              type: wasm
+              wasm:
+                image: envoyproxy/envoy-wasm:1.1.0
+                config: |
+                  {
+                    "rules": [
+                      {
+                        "matches": [{"headers": [{"name": ":path", "prefix": "/api/"}]}],
+                        "requires": {"remoteJwks": {"uri": "https://your-jwks-uri", "timeout": "5s", "cacheDuration": "300s"}},
+                        "actions": [
+                          {
+                            "action": "setHeader",
+                            "header": "x-user-id",
+                            "value": "{{ .Claims.sub }}"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+deployment:
+  replicas: 3 
+service:
+  type: NodePort 
+telemetry:
+  metrics:
+    prometheus:
+      enabled: true 
+#  tracing:
+#    enabled: true
+#    provider: otel  
+#    address: jaeger-collector.default.svc.cluster.local:4317
+logging:
+  level: info

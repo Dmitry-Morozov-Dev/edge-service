@@ -1,0 +1,11 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: envoy-monitor
+spec:
+  selector:
+    matchLabels:
+      gateway: messenger-gateway
+  endpoints:
+  - port: http-envoy-prom
+    path: /stats/prometheus
