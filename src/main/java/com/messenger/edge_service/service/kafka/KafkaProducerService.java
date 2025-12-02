@@ -23,7 +23,7 @@ public class KafkaProducerService {
     public Mono<Void> send(String topic, String key, String value, String userId) {
         return kafkaSender.send(Mono.just(SenderRecord.create(topic, null, null, key, value, null)))
                 .next()
-                .doOnSuccess(res -> log.atInfo().addKeyValue("userId", userId).addKeyValue("key", key).log("Sent to Kafka"))
+                .doOnSuccess(res -> log.atInfo().addKeyValue("userId", userId).addKeyValue("key", key).log("Sent to Kafka:" + value))
                 .then();
     }
 

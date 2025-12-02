@@ -8,5 +8,6 @@ public enum EventType {
     EDIT,
     DELETE,
     TYPING,
-    ONLINE
+    ONLINE,
+    PARTICIPATE
 }

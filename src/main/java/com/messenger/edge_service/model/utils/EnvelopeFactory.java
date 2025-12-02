@@ -9,9 +9,10 @@ import java.util.List;
 
 public class EnvelopeFactory {
 
-    public static MessageEnvelope createAck(String tempId, String realId) {
+    public static MessageEnvelope createAck(String chatId, String tempId, String realId) {
         return MessageEnvelope.builder()
                 .type(EventType.ACK)
+                .chatId(chatId)
                 .tempId(tempId)
                 .realId(realId)
                 .timestamp(Instant.now().toEpochMilli())
@@ -101,7 +102,6 @@ public class EnvelopeFactory {
                 .chatId(chatId)
                 .senderId(senderId)
                 .receiverId(receiverId)
-                .realId(readUpTo)
                 .readUpTo(readUpTo)
                 .timestamp(Instant.now().toEpochMilli())
                 .build();
@@ -109,7 +109,7 @@ public class EnvelopeFactory {
 
     public static MessageEnvelope createDelivered(String chatId, String realId, String senderId, String receiverId) {
         return MessageEnvelope.builder()
-                .type(EventType.READ)
+                .type(EventType.DELIVERED)
                 .chatId(chatId)
                 .senderId(senderId)
                 .receiverId(receiverId)

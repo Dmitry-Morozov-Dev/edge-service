@@ -16,6 +16,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.data.redis.connection.ReactiveSubscription;
+import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
 import org.springframework.data.redis.core.ReactiveRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.socket.WebSocketSession;
@@ -101,7 +102,7 @@ public class EdgeStreamService {
                         err -> log.error("Fatal Pub/Sub processing error on {}: {}", edgeId, err.getMessage(), err)
                 );
 
-        log.info("EdgeStreamService listening on channel {}", edgeId);
+        log.info("EdgeStreamService listening on channel {}", channelsPattern);
     }
 
     private Mono<ProcessedEnvelope> preprocessPayload(String rawJson) {
@@ -111,6 +112,11 @@ public class EdgeStreamService {
                     if(env.getType() == null)
                         throw new IllegalArgumentException("Message envelope doesn't consist of event type");
 
+                    if(env.getType() == EventType.PARTICIPATE){
+                        sessionManager.addExistingUserSessionsToChat(env.getChatId(), env.getReceiverId());
+                        return null;
+                    }
+
                     if(env.getChatId() == null || env.getSenderId() == null)
                         throw new IllegalArgumentException("Message envelope doesn't consist of chatId or senderId");
 
@@ -119,13 +125,22 @@ public class EdgeStreamService {
                     String senderId = env.getSenderId();
 
                     Map<String, WebSocketSession> sessions = sessionManager.getChatSessions(chatId);
-                    Set<String> senderSessions = sessionManager.getUserSessions(senderId);
+                    Set<String> senderSessions;
+                    if (env.getType() == EventType.DELIVERED ||
+                            env.getType() == EventType.READ) {
+                        log.debug(env.getReceiverId());
+                        senderSessions = sessionManager.getUserSessions(env.getReceiverId());
+                    } else {
+                        senderSessions = sessionManager.getUserSessions(senderId);
+                    }
 
                     if (sessions == null || sessions.isEmpty()) {
                         return null;
                     }
+                    log.debug(rawJson);
 
                     return new ProcessedEnvelope(eventType, rawJson, sessions, senderSessions);
+
                 })
                 .subscribeOn(Schedulers.parallel())
                 .filter(Objects::nonNull);

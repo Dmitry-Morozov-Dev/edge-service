@@ -33,8 +33,8 @@ spring:
 
 redis:
   pubsub:
-    cluster:
-      nodes: ${REDIS_PUBSUB_NODES:localhost:6381,localhost:6382,localhost:6383}
+    host: ${REDIS_PUBSUB_HOST:localhost}
+    port: ${REDIS_PUBSUB_PORT:6379}
     config:
       connect-timeout-ms: 15000
       command-timeout-ms: 10000
@@ -44,8 +44,8 @@ redis:
       validate-cluster-node-membership: false
 
   cache:
-    cluster:
-      nodes: ${REDIS_CACHE_NODES:localhost:6391,localhost:6392,localhost:6393}
+    host: ${REDIS_CACHE_HOST:localhost}
+    port: ${REDIS_CACHE_PORT:6380}
     config:
       connect-timeout-ms: 15000
       command-timeout-ms: 10000
@@ -67,7 +67,8 @@ management:
       show-details: always
 
 edge:
-  id: ${EDGE_ID:edge-${random.uuid}}    # change in prod
+  id: edge-12e7b012-e3db-491c-9cf3-b37ac7ea8f81
+  #id: ${EDGE_ID:edge-${random.uuid}}    # change in prod
   websocket:
     path: "/ws/connect"
     compression: true
@@ -82,7 +83,7 @@ edge:
   broadcast:
     concurrency: ${EDGE_BROADCAST_CONCURRENCY:16}
   channel:
-    pattern: ${EDGE_CHANNEL_PATTERN:edge:${edge.id}:messages:*}
+    pattern: ${EDGE_CHANNEL_PATTERN:edge:${edge.id}:messages:in}
   validation:
     message:
       content-max-length: 4096
@@ -93,7 +94,7 @@ edge:
 grpc:
   client:
     userChatsService:
-      address: 'static://chat-service:9090'
+      address: "static://${CHAT_SERVICE_HOST:localhost}:${CHAT_SERVICE_PORT:9090}"
       negotiationType: plaintext
       maxInboundMessageSize: 4194304   # 4MB
       keepAliveTime: 60

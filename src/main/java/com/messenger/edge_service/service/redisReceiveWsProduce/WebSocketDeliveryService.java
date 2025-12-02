@@ -26,8 +26,7 @@ public class WebSocketDeliveryService {
         // READ / DELIVERED — only to receiver
         if (envelope.eventType() == EventType.DELIVERED ||
                 envelope.eventType() == EventType.READ) {
-            return sendFiltered(envelope, entry ->
-                    envelope.senderSessions().contains(entry.getKey()));
+            return sendFiltered(envelope, entry -> true);
         }
 
         // Other event — to everyone except sender
@@ -41,6 +40,8 @@ public class WebSocketDeliveryService {
     ) {
         String payload = processed.envelope();
 
+        log.debug(processed.sessions().toString());
+        log.debug(processed.senderSessions().toString());
         return Flux.fromIterable(processed.sessions().entrySet())
                 .filter(filter)
                 .flatMap(entry -> {
@@ -54,9 +55,11 @@ public class WebSocketDeliveryService {
                                         entry.getKey(), e.getMessage());
                                 return Mono.empty();
                             })
+                            .doOnSuccess(e -> log.debug("READ:" + entry))
                             .then();
                 }, broadcastConcurrency)
-                .then();
+                .then()
+                .doOnSuccess(e -> log.debug("READAll:" + processed));
     }
 }
 

@@ -100,7 +100,7 @@ public class SessionManager {
             KafkaProducerService kafkaProducerService,
             JsonUtils jsonUtils,
             MeterRegistry meterRegistry,
-            @Value("${spring.application.name}") String edgeId,
+            @Value("${edge.id}") String edgeId,
             @Value("${edge.max-sessions-per-user:5}") int maxSessionsPerUser
     ) {
         this.cacheRedisTemplate = cacheRedisTemplate;
@@ -122,9 +122,9 @@ public class SessionManager {
         Set<String> currentUserSessions = userSessions.asMap()
                 .computeIfAbsent(userId, k -> ConcurrentHashMap.newKeySet());
 
-        if (currentUserSessions.size() >= maxSessionsPerUser) {
-            throw new IllegalStateException("Max sessions per user exceeded");
-        }
+//        if (currentUserSessions.size() >= maxSessionsPerUser) {
+//            throw new IllegalStateException("Max sessions per user exceeded");
+//        }
 
         currentUserSessions.add(sessionId);
         SessionInfo info = new SessionInfo(userId, session);
@@ -251,6 +251,12 @@ public class SessionManager {
                 .flatMap(info -> {
                     String redisKey = "user:" + userId + ":edge";
 
+                    sessions.asMap().forEach((sessionId1, info1) -> {
+                        System.out.println("SessionId: " + sessionId
+                                + ", UserId: " + info.userId()
+                                + ", WS open: " + (info.wsSession() != null && info.wsSession().isOpen()));
+                    });
+
                     return cacheRedisTemplate.expire(redisKey, Duration.ofSeconds(SESSION_TTL))
                             .doOnSuccess(s -> sessions.put(sessionId, info))
                             .onErrorResume(e -> {
@@ -367,6 +373,46 @@ public class SessionManager {
     public Map<String, WebSocketSession> getChatSessions(String chatId) {
         ConcurrentHashMap<String, WebSocketSession> usersMap = chatSessions.getIfPresent(chatId);
         return usersMap != null ? Map.copyOf(usersMap) : Map.of();
+    }
+
+    @CircuitBreaker(name = "redisOps", fallbackMethod = "addEdgeToChatFallback")
+    private Mono<Void> addEdgeToChat(String chatId) {
+        String key = "chat:" + chatId + ":edges";
+
+        return cacheRedisTemplate.opsForSet()
+                .add(key, edgeId)
+                .then()
+                .retryWhen(Retry.backoff(3, Duration.ofMillis(100))
+                        .filter(t -> t instanceof RedisConnectionException));
+    }
+
+    private Mono<Void> addEdgeToChatFallback(String chatId, Throwable t) {
+        log.warn("Redis unavailable for addEdgeToChat(chatId={}), will retry later", chatId, t);
+        return Mono.empty();
+    }
+
+
+    public void addExistingUserSessionsToChat(String chatId, String userId) {
+        Set<String> sessionIds = userSessions.getIfPresent(userId);
+        if (sessionIds == null || sessionIds.isEmpty()) {
+            log.debug("No active sessions for user {} to add to chat {}", userId, chatId);
+            return;
+        }
+
+        ConcurrentHashMap<String, WebSocketSession> chatMap =
+                chatSessions.asMap().computeIfAbsent(chatId, k -> new ConcurrentHashMap<>());
+
+        for (String sessionId : sessionIds) {
+            SessionInfo info = sessions.getIfPresent(sessionId);
+            if (info != null) {
+                chatMap.put(sessionId, info.wsSession());
+                log.debug("Added session {} of user {} to chat {}", sessionId, userId, chatId);
+            }
+        }
+
+        addEdgeToChat(chatId)
+                .onErrorResume(e -> Mono.empty())
+                .subscribe();
     }
 
     @PreDestroy

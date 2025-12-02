@@ -4,6 +4,7 @@ import com.messenger.edge_service.model.dto.MediaDTO;
 import com.messenger.edge_service.model.dto.MessageEnvelope;
 import com.messenger.edge_service.service.session.SessionManager;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.socket.WebSocketSession;
@@ -13,6 +14,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
+@Slf4j
 @Component
 @RequiredArgsConstructor
 public class MessageValidationService {
@@ -118,6 +120,7 @@ public class MessageValidationService {
         validateSenderConsistency(env.getSenderId(), userId);
         validateReceiverId(env.getReceiverId());
         validateMembership(env.getChatId(), userId);
+        validateSelfDelivery(env.getSenderId(), env.getReceiverId());
 
         if (env.getContent() != null ||
                 env.getMediaDTOS() != null ||
@@ -139,6 +142,7 @@ public class MessageValidationService {
         validateSenderConsistency(env.getSenderId(), userId);
         validateReceiverId(env.getReceiverId());
         validateMembership(env.getChatId(), userId);
+        validateSelfDelivery(env.getSenderId(), env.getReceiverId());
 
         if (env.getContent() != null ||
                 env.getMediaDTOS() != null ||
@@ -202,6 +206,12 @@ public class MessageValidationService {
     private void validateSenderConsistency(String senderId, String userId) {
         if (senderId != null && !senderId.equals(userId)) {
             throw new IllegalArgumentException("senderId mismatch");
+        }
+    }
+
+    private void validateSelfDelivery(String senderId, String receiverId) {
+        if (senderId.equals(receiverId)) {
+            throw new IllegalArgumentException("sender == receiver");
         }
     }
 

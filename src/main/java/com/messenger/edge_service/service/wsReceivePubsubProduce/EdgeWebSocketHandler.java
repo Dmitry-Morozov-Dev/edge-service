@@ -4,6 +4,7 @@ import com.datastax.oss.driver.api.core.uuid.Uuids;
 import com.messenger.edge_service.config.SchedulerPools;
 import com.messenger.edge_service.error.ServiceDegradedException;
 import com.messenger.edge_service.model.dto.MessageEnvelope;
+import com.messenger.edge_service.model.enums.EventType;
 import com.messenger.edge_service.model.utils.EnvelopeFactory;
 import com.messenger.edge_service.service.kafka.KafkaProducerService;
 import com.messenger.edge_service.service.session.SessionManager;
@@ -87,7 +88,7 @@ public class EdgeWebSocketHandler implements WebSocketHandler {
                     String sessionId = UUID.randomUUID().toString();
 
                     Mono<Void> closeTrigger = session.close()
-                            .doOnSuccess(v -> log.debug("Physical close sent: userId={}", userId))
+                            .doOnSuccess(v -> log.debug("Physical close sent: userId={}, closeStatus={}", userId, session.closeStatus()))
                             .cache();
 
                     return sessionManager.addSession(userId, sessionId, session)
@@ -96,14 +97,14 @@ public class EdgeWebSocketHandler implements WebSocketHandler {
                                                     handleInbound(session, userId, sessionId),
                                                     sendHeartbeat(session, userId, sessionId)
                                             )
-                                            .takeUntilOther(closeTrigger)
+                                            .takeUntilOther(session.closeStatus().then(Mono.empty()))
                                             .doOnCancel(() -> {
-                                                log.info("Clean cancel → cleanup session: userId={}", userId);
+                                                log.debug("Clean cancel → cleanup session: userId={}", userId);
                                                 sessionManager.cleanupSession(userId, sessionId).subscribe();
                                             })
                             )
                             .onErrorResume(ServiceDegradedException.class, e -> {
-                                log.info("Service degraded → reconnect");
+                                log.debug("Service degraded → reconnect");
                                 sessionManager.degradedServiceHandler(userId, sessionId, e);
                                 return closeTrigger.then(Mono.error(e));
                             })
@@ -143,7 +144,7 @@ public class EdgeWebSocketHandler implements WebSocketHandler {
     }
 
     private Flux<Void> sendHeartbeat(WebSocketSession session, String userId, String sessionId) {
-        Duration heartbeatInterval = Duration.ofSeconds(Math.max(1, heartbeatIntervalSeconds)); // защитный минимум 1s
+        Duration heartbeatInterval = Duration.ofSeconds(Math.max(1, heartbeatIntervalSeconds));
         return Flux.interval(heartbeatInterval)
                 .flatMap(i -> session.send(Mono.just(session.textMessage("ping"))))
                 .doOnError(e -> {
@@ -163,17 +164,27 @@ public class EdgeWebSocketHandler implements WebSocketHandler {
 
                     String payload = msg.getPayloadAsText();
 
+                    log.debug("INCOMING PAYLOAD: {}", payload);
+
                     if ("pong".equals(payload)) {
                         return sessionManager.updateHeartbeat(userId, sessionId)
                                 .then(Mono.empty());
                     }
 
                     return jsonUtils.parseEnvelope(payload)
+                            .doOnNext(envelope ->
+                                    log.debug("PARSED ENVELOPE: type={}, readUpTo='{}', realId='{}'",
+                                            envelope.getType(),
+                                            envelope.getReadUpTo(),
+                                            envelope.getRealId()))
                             .subscribeOn(Schedulers.parallel())
                             .publishOn(SchedulerPools.CPU_SCHEDULER)
-                            .flatMap(envelope -> handleEvent(envelope, userId, session))
+                            .flatMap(envelope -> {
+                                log.debug("CALLING handleEvent: type={}", envelope.getType());
+                                return handleEvent(envelope, userId, session);
+                            })
                             .onErrorResume(e -> {
-                                log.warn("Event processing failed: userId={}, error={}", userId, e.toString());
+                                log.error("Event processing FAILED: userId={}, error={}", userId, e.toString(), e);
                                 messagesFailedCounter.increment();
                                 return errorHandler.sendError(session, "invalid event");
                             });
@@ -185,6 +196,16 @@ public class EdgeWebSocketHandler implements WebSocketHandler {
     }
 
     private Mono<Void> handleEvent(MessageEnvelope envelope, String userId, WebSocketSession session) {
+        if (envelope.getType() == EventType.READ) {
+            log.debug("=== READ EVENT INCOMING ===");
+            log.debug("userId: {}", userId);
+            log.debug("env.readUpTo: '{}'", envelope.getReadUpTo());
+            log.debug("env.realId: '{}'", envelope.getRealId());
+            log.debug("env.chatId: '{}'", envelope.getChatId());
+            log.debug("env.senderId: '{}'", envelope.getSenderId());
+            log.debug("env.receiverId: '{}'", envelope.getReceiverId());
+            log.debug("========================");
+        }
         return Mono.just(envelope.getType())
                 .flatMap(type -> switch (type) {
                     case MESSAGE ->     validate(() ->          validator.validateMessage(envelope, userId))
@@ -216,7 +237,7 @@ public class EdgeWebSocketHandler implements WebSocketHandler {
     private Mono<Void> handleMessage(MessageEnvelope env, String userId, WebSocketSession session) {
         UUID realId = Uuids.timeBased();
 
-        MessageEnvelope ack = EnvelopeFactory.createAck(env.getTempId(), env.getRealId());
+        MessageEnvelope ack = EnvelopeFactory.createAck(env.getChatId(), env.getTempId(), realId.toString());
 
         MessageEnvelope enrichedEnvelope = EnvelopeFactory.createEnrichedMessage(
                 env.getChatId(),
@@ -261,7 +282,6 @@ public class EdgeWebSocketHandler implements WebSocketHandler {
                 env.getChatId(),
                 userId
         );
-
         return publishToKafka(typingEvent, null, userId);
     }
 
@@ -269,6 +289,7 @@ public class EdgeWebSocketHandler implements WebSocketHandler {
         MessageEnvelope readEvent =
                 EnvelopeFactory.createRead(env.getChatId(), userId, env.getReceiverId(), env.getReadUpTo());
 
+        log.debug("В handleRead readUpTo = {}", readEvent.getReadUpTo());
         return publishToKafka(readEvent, null, userId);
     }
 
@@ -280,7 +301,10 @@ public class EdgeWebSocketHandler implements WebSocketHandler {
     }
 
     private Mono<Void> publishToKafka(MessageEnvelope env, String routingKey, String userId) {
-        return jsonUtils.toJson(env)
+        return Mono.just(env)
+                .doOnNext(e -> log.debug("В publishToKafka readUpTo = {}", e.getReadUpTo()))
+                .flatMap(e -> jsonUtils.toJson(e))
+                .doOnNext(e -> log.debug("В publishToKafka после to json readUpTo = {}", e))
                 .flatMap(json -> kafkaProducerService.send(
                         messageOutTopic,
                         routingKey, json, userId
